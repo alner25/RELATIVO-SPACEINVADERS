@@ -9,7 +9,7 @@ ENEMY_BULLET_SOUND_PATH = os.path.join(AUDIO_DIR, "enemy_bullet.wav")
 EXPLOSION_SOUND_PATH = os.path.join(AUDIO_DIR, "explosion.wav")
 HIT_SOUND_PATH = os.path.join(AUDIO_DIR, "hit.wav")
 BOSS_SOUND_PATH = os.path.join(AUDIO_DIR, "boss.wav")
-BACKGROUND_MUSIC_PATH = os.path.join(AUDIO_DIR, "background_music.wav")
+BACKGROUND_MUSIC_PATH = os.path.join(AUDIO_DIR, "background_music1.ogg")
 
 _enabled = True
 _music_volume = 0.28
