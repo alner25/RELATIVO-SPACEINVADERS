@@ -1,0 +1,12 @@
+{
+    "master_volume": 80,
+    "music_volume": 70,
+    "sfx_volume": 85,
+    "mute_all": false,
+    "difficulty": "NORMAL",
+    "screen_shake": true,
+    "particles": true,
+    "show_fps": false,
+    "fullscreen": false,
+    "mobile_controls": false
+}
