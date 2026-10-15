@@ -1,9 +1,9 @@
-```python
+
 import sys
+import asyncio
 import pygame
 
 from audio import initialize_audio, play_button, unlock_audio
-
 from db import initialize_database
 from screens.login import LoginScreen
 from screens.register import RegisterScreen
@@ -13,15 +13,19 @@ from screens.leaderboard import LeaderboardScreen
 from screens.settings import SettingsScreen
 from managers.game_manager import GameManager
 
-pygame.init()
-
-# Initialize audio safely. Do not start music automatically.
-initialize_audio()
-
-pygame.display.set_caption("Space Invaders by Relativo, Alner A.")
+IS_WEB = sys.platform == "emscripten"
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 MIN_WIDTH, MIN_HEIGHT = 600, 500
+
+pygame.init()
+
+try:
+    initialize_audio()
+except Exception as exc:
+    print(f"[AUDIO] Initialization skipped: {exc}")
+
+pygame.display.set_caption("Space Invaders by Relativo, Alner A.")
 
 screen = pygame.display.set_mode(
     (SCREEN_WIDTH, SCREEN_HEIGHT),
@@ -29,26 +33,40 @@ screen = pygame.display.set_mode(
 )
 clock = pygame.time.Clock()
 
-# Database initialization can fail on GitHub Pages because
-# browser-hosted Python cannot connect directly to local XAMPP.
-try:
-    initialize_database()
-except Exception as exc:
-    print(f"[DATABASE] Initialization failed: {exc}")
+# MySQL is only used on desktop.
+if not IS_WEB:
+    try:
+        initialize_database()
+    except Exception as exc:
+        print(f"[DATABASE] Initialization failed: {exc}")
 
-state = "login"
-player = None
+player = (
+    {
+        "player_id": None,
+        "id": None,
+        "player_name": "GUEST",
+        "username": "GUEST",
+        "avatar": "astronaut",
+    }
+    if IS_WEB else None
+)
 
-login_screen = register_screen = menu_screen = None
-profile_screen = leaderboard_screen = settings_screen = None
+state = "menu" if IS_WEB else "login"
+
+login_screen = None
+register_screen = None
+menu_screen = None
+profile_screen = None
+leaderboard_screen = None
+settings_screen = None
 game_manager = None
 
 
-def player_id():
+def get_player_id():
     return (player or {}).get("player_id") or (player or {}).get("id")
 
 
-def player_name():
+def get_player_name():
     return (
         (player or {}).get("player_name")
         or (player or {}).get("username")
@@ -113,8 +131,8 @@ def create_game():
         screen,
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
-        player_id(),
-        player_name()
+        get_player_id(),
+        get_player_name()
     )
 
 
@@ -160,114 +178,139 @@ def resize(event):
         create_game()
 
 
-create_login()
-running = True
+def handle_event(event):
+    global state, player, running
 
-while running:
-    events = pygame.event.get()
+    if event.type == pygame.QUIT:
+        running = False
+        return
 
-    for event in events:
+    if event.type == pygame.VIDEORESIZE:
+        resize(event)
+        return
 
-        # Unlock audio only after real user interaction.
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if getattr(event, "button", None) == 1:
+    # Audio errors should never stop game input.
+    if event.type == pygame.MOUSEBUTTONDOWN:
+        if getattr(event, "button", None) == 1:
+            try:
                 unlock_audio()
                 play_button()
+            except Exception as exc:
+                print(f"[AUDIO] Click audio unavailable: {exc}")
 
-        elif event.type == pygame.KEYDOWN:
+    elif event.type == pygame.KEYDOWN:
+        try:
             unlock_audio()
+        except Exception as exc:
+            print(f"[AUDIO] Audio unlock unavailable: {exc}")
 
-        if event.type == pygame.QUIT:
+    if state == "login" and login_screen:
+        result = login_screen.handle_event(event)
+
+        if result == "register":
+            create_register()
+            state = "register"
+        elif isinstance(result, dict):
+            player = result
+            create_menu()
+            state = "menu"
+
+    elif state == "register" and register_screen:
+        result = register_screen.handle_event(event)
+
+        if result == "login":
+            create_login()
+            state = "login"
+        elif isinstance(result, dict):
+            player = result
+            create_menu()
+            state = "menu"
+
+    elif state == "menu" and menu_screen:
+        result = menu_screen.handle_event(event)
+
+        if result == "game":
+            create_game()
+            state = "game"
+        elif result == "profile":
+            create_profile()
+            state = "profile"
+        elif result == "leaderboard":
+            create_leaderboard()
+            state = "leaderboard"
+        elif result == "settings":
+            create_settings()
+            state = "settings"
+        elif result == "logout":
+            if IS_WEB:
+                # Guests stay in guest mode in the browser.
+                player = {
+                    "player_id": None,
+                    "id": None,
+                    "player_name": "GUEST",
+                    "username": "GUEST",
+                    "avatar": "astronaut",
+                }
+                create_menu()
+                state = "menu"
+            else:
+                logout()
+        elif result == "quit":
             running = False
-            continue
 
-        if event.type == pygame.VIDEORESIZE:
-            resize(event)
-            continue
+    elif state == "profile" and profile_screen:
+        result = profile_screen.handle_event(event)
 
-        if state == "login" and login_screen:
-            result = login_screen.handle_event(event)
+        if isinstance(result, dict):
+            player = result
+        elif result in ("back", "menu"):
+            create_menu()
+            state = "menu"
+        elif result == "logout":
+            logout()
 
-            if result == "register":
-                create_register()
-                state = "register"
+    elif state == "leaderboard" and leaderboard_screen:
+        result = leaderboard_screen.handle_event(event)
 
-            elif isinstance(result, dict):
-                player = result
-                create_menu()
-                state = "menu"
+        if result in ("back", "menu"):
+            create_menu()
+            state = "menu"
 
-        elif state == "register" and register_screen:
-            result = register_screen.handle_event(event)
+    elif state == "settings" and settings_screen:
+        result = settings_screen.handle_event(event)
 
-            if result == "login":
-                create_login()
-                state = "login"
+        if result in ("back", "menu"):
+            create_menu()
+            state = "menu"
 
-            elif isinstance(result, dict):
-                player = result
-                create_menu()
-                state = "menu"
 
-        elif state == "menu" and menu_screen:
-            result = menu_screen.handle_event(event)
-
-            if result == "game":
-                create_game()
-                state = "game"
-            elif result == "profile":
-                create_profile()
-                state = "profile"
-            elif result == "leaderboard":
-                create_leaderboard()
-                state = "leaderboard"
-            elif result == "settings":
-                create_settings()
-                state = "settings"
-            elif result == "logout":
-                logout()
-            elif result == "quit":
-                running = False
-
-        elif state == "profile" and profile_screen:
-            result = profile_screen.handle_event(event)
-
-            if isinstance(result, dict):
-                player = result
-            elif result in ("back", "menu"):
-                create_menu()
-                state = "menu"
-            elif result == "logout":
-                logout()
-
-        elif state == "leaderboard" and leaderboard_screen:
-            result = leaderboard_screen.handle_event(event)
-
-            if result in ("back", "menu"):
-                create_menu()
-                state = "menu"
-
-        elif state == "settings" and settings_screen:
-            result = settings_screen.handle_event(event)
-
-            if result in ("back", "menu"):
-                create_menu()
-                state = "menu"
-
-    dt = min(clock.tick(60) / 1000.0, 0.1)
+def update_and_draw(dt, events):
+    global state, running
 
     if state == "login" and login_screen:
         update_screen(login_screen, dt)
+        login_screen.draw()
+
     elif state == "register" and register_screen:
         update_screen(register_screen, dt)
+        register_screen.draw()
+
     elif state == "menu" and menu_screen:
         update_screen(menu_screen, dt)
+        menu_screen.draw()
+
     elif state == "profile" and profile_screen:
         update_screen(profile_screen, dt)
+        profile_screen.draw()
+
     elif state == "leaderboard" and leaderboard_screen:
         update_screen(leaderboard_screen, dt)
+        leaderboard_screen.draw()
+
     elif state == "settings" and settings_screen:
         update_screen(settings_screen, dt)
+        settings_screen.draw()
+
     elif state == "game" and game_manager:
         result = game_manager.update(events)
 
@@ -277,23 +320,37 @@ while running:
         elif result == "quit":
             running = False
 
-    if state == "login" and login_screen:
-        login_screen.draw()
-    elif state == "register" and register_screen:
-        register_screen.draw()
-    elif state == "menu" and menu_screen:
-        menu_screen.draw()
-    elif state == "profile" and profile_screen:
-        profile_screen.draw()
-    elif state == "leaderboard" and leaderboard_screen:
-        leaderboard_screen.draw()
-    elif state == "settings" and settings_screen:
-        settings_screen.draw()
-    elif state == "game" and game_manager:
-        game_manager.draw()
+        if state == "game" and game_manager:
+            game_manager.draw()
+        elif state == "menu" and menu_screen:
+            menu_screen.draw()
 
     pygame.display.flip()
 
-pygame.quit()
-sys.exit()
-```
+
+async def main():
+    global running
+
+    if IS_WEB:
+        create_menu()
+    else:
+        create_login()
+
+    running = True
+
+    while running:
+        events = pygame.event.get()
+
+        for event in events:
+            handle_event(event)
+
+        dt = min(clock.tick(60) / 1000.0, 0.1)
+        update_and_draw(dt, events)
+
+        # Let the browser event loop run; important for Pygbag.
+        await asyncio.sleep(0)
+
+    pygame.quit()
+
+
+asyncio.run(main())
